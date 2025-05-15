@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_DB: weather
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  migrate:
+    image: migrate/migrate
+    depends_on:
+      - db
+    entrypoint: ["/bin/sh", "-c", "/scripts/wait-for-postgres.sh db 5432 postgres && migrate -path /migrations -database 'postgres://postgres:postgres@db:5432/weather?sslmode=disable' up"]
+    volumes:
+      - ./migrations:/migrations
+      - ./scripts:/scripts
+
+  app:
+    build: .
+    depends_on:
+      - db
+      - migrate
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=weather
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./scripts:/scripts
+    command: ["/bin/sh", "-c", "/scripts/wait-for-postgres.sh db 5432 postgres && ./weather-api-application"]
+
+
+volumes:
+  db_data:
