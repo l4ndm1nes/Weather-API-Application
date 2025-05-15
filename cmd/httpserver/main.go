@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"github.com/gin-gonic/gin"
+	mailer "github.com/l4ndm1nes/Weather-API-Application/internal/adapter/mail"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/repo"
+	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/weatherapi"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/app/service"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/handler"
 	"gorm.io/driver/postgres"
@@ -27,8 +29,13 @@ func main() {
 	}
 
 	subscriptionRepo := repo.NewPostgresRepo(db)
-	subService := service.NewSubscriptionService(subscriptionRepo)
-	subHandler := handler.NewSubscriptionHandler(subService)
+	smtpMailer := mailer.NewSMTPMailerFromEnv()
+	subService := service.NewSubscriptionService(subscriptionRepo, smtpMailer)
+
+	weatherProvider := weatherapi.NewWeatherAPIProviderFromEnv()
+	weatherService := service.NewWeatherService(weatherProvider)
+
+	subHandler := handler.NewSubscriptionHandler(subService, weatherService)
 
 	r := gin.Default()
 	handler.RegisterRoutes(r, subHandler)

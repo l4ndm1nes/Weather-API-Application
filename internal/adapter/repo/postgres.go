@@ -36,6 +36,25 @@ func (r *PostgresRepo) ConfirmByToken(token string) error {
 }
 
 func (r *PostgresRepo) UnsubscribeByToken(token string) error {
-	return r.db.Where("unsubscribe_token = ?", token).
-		Delete(&model.Subscription{}).Error
+	result := r.db.Where("unsubscribe_token = ?", token).Delete(&model.Subscription{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepo) GetByToken(token string) (*model.Subscription, error) {
+	var sub model.Subscription
+	result := r.db.Where("confirm_token = ?", token).First(&sub)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &sub, nil
+}
+
+func (r *PostgresRepo) Update(sub *model.Subscription) error {
+	return r.db.Save(sub).Error
 }

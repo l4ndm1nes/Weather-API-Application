@@ -7,6 +7,7 @@ import (
 type SubscriptionRepository interface {
 	Create(sub *model.Subscription) error
 	FindByEmail(email string) (*model.Subscription, error)
-	ConfirmByToken(token string) error
+	GetByToken(token string) (*model.Subscription, error)
+	Update(sub *model.Subscription) error
 	UnsubscribeByToken(token string) error
 }

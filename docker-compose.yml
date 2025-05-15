@@ -27,18 +27,13 @@ services:
     depends_on:
       - db
       - migrate
-    environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - DB_NAME=weather
+    env_file:
+      - .env
     ports:
       - "8080:8080"
     volumes:
       - ./scripts:/scripts
     command: ["/bin/sh", "-c", "/scripts/wait-for-postgres.sh db 5432 postgres && ./weather-api-application"]
-
 
 volumes:
   db_data:

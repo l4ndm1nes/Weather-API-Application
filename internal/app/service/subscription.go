@@ -8,12 +8,15 @@ import (
 	"github.com/l4ndm1nes/Weather-API-Application/internal/model"
 )
 
+var ErrNotFound = errors.New("subscription not found")
+
 type SubscriptionService struct {
-	Repo port.SubscriptionRepository
+	Repo   port.SubscriptionRepository
+	Mailer port.Mailer
 }
 
-func NewSubscriptionService(repo port.SubscriptionRepository) *SubscriptionService {
-	return &SubscriptionService{Repo: repo}
+func NewSubscriptionService(repo port.SubscriptionRepository, mailer port.Mailer) *SubscriptionService {
+	return &SubscriptionService{Repo: repo, Mailer: mailer}
 }
 
 func generateToken() (string, error) {
@@ -46,11 +49,21 @@ func (s *SubscriptionService) Subscribe(email, city, frequency string) (*model.S
 	if err := s.Repo.Create(sub); err != nil {
 		return nil, err
 	}
+
+	_ = s.Mailer.SendConfirmation(email, confirmToken)
 	return sub, nil
 }
 
 func (s *SubscriptionService) ConfirmSubscription(token string) error {
-	return s.Repo.ConfirmByToken(token)
+	sub, err := s.Repo.GetByToken(token)
+	if err != nil {
+		return ErrNotFound
+	}
+	if sub.Confirmed {
+		return errors.New("already confirmed")
+	}
+	sub.Confirmed = true
+	return s.Repo.Update(sub)
 }
 
 func (s *SubscriptionService) Unsubscribe(token string) error {

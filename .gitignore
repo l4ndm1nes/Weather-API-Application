@@ -1,26 +1,29 @@
-/weather-api-application
 *.exe
+*.test
+*.out
+*.coverprofile
 
 bin/
 build/
 dist/
 
-*.test
-*.out
-*.coverprofile
-
-.vscode/
 .idea/
-*.swp
-*.swo
+*.iml
+
 .DS_Store
-
-docker-compose.override.yml
-
 Thumbs.db
 ehthumbs.db
+
+*.swp
+*.swo
 
 *.log
 
 .env
 .env.*
+
+docker-compose.override.yml
+
+/weather-api-application
+
+*.bak
