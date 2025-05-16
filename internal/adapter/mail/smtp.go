@@ -2,8 +2,9 @@ package mail
 
 import (
 	"fmt"
+	"github.com/l4ndm1nes/Weather-API-Application/pkg"
+	"go.uber.org/zap"
 	"net/smtp"
-	"os"
 )
 
 type SMTPMailer struct {
@@ -15,14 +16,14 @@ type SMTPMailer struct {
 	BaseURL  string
 }
 
-func NewSMTPMailerFromEnv() *SMTPMailer {
+func NewSMTPMailer(host, port, username, password, from, baseURL string) *SMTPMailer {
 	return &SMTPMailer{
-		Host:     os.Getenv("SMTP_HOST"),
-		Port:     os.Getenv("SMTP_PORT"),
-		Username: os.Getenv("SMTP_USER"),
-		Password: os.Getenv("SMTP_PASS"),
-		From:     os.Getenv("SMTP_FROM"),
-		BaseURL:  os.Getenv("BASE_URL"),
+		Host:     host,
+		Port:     port,
+		Username: username,
+		Password: password,
+		From:     from,
+		BaseURL:  baseURL,
 	}
 }
 
@@ -35,7 +36,18 @@ func (m *SMTPMailer) SendConfirmation(email, token string) error {
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
 		m.From, email, subject, body)
 	auth := smtp.PlainAuth("", m.Username, m.Password, m.Host)
-	return smtp.SendMail(addr, auth, m.From, []string{email}, []byte(msg))
+	err := smtp.SendMail(addr, auth, m.From, []string{email}, []byte(msg))
+	if err != nil {
+		pkg.Logger.Error("Failed to send confirmation email",
+			zap.String("to", email),
+			zap.Error(err),
+		)
+		return err
+	}
+	pkg.Logger.Info("Confirmation email sent",
+		zap.String("to", email),
+	)
+	return nil
 }
 
 func (m *SMTPMailer) SendWeatherUpdate(email, city, weatherInfo string) error {
@@ -46,5 +58,18 @@ func (m *SMTPMailer) SendWeatherUpdate(email, city, weatherInfo string) error {
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
 		m.From, email, subject, body)
 	auth := smtp.PlainAuth("", m.Username, m.Password, m.Host)
-	return smtp.SendMail(addr, auth, m.From, []string{email}, []byte(msg))
+	err := smtp.SendMail(addr, auth, m.From, []string{email}, []byte(msg))
+	if err != nil {
+		pkg.Logger.Error("Failed to send weather update",
+			zap.String("to", email),
+			zap.String("city", city),
+			zap.Error(err),
+		)
+		return err
+	}
+	pkg.Logger.Info("Weather update sent",
+		zap.String("to", email),
+		zap.String("city", city),
+	)
+	return nil
 }

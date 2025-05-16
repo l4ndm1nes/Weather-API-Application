@@ -6,44 +6,47 @@ import (
 	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/mail"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/repo"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/weatherapi"
+	"github.com/l4ndm1nes/Weather-API-Application/internal/config"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/handler"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/scheduler"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/service"
+	"github.com/l4ndm1nes/Weather-API-Application/pkg"
+	"github.com/robfig/cron/v3"
+	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"log"
-	"os"
-
-	"github.com/robfig/cron/v3"
 )
 
 func main() {
+	pkg.InitLogger()
+	defer pkg.Logger.Sync()
+
+	cfg := config.LoadConfig()
+
 	dsn := fmt.Sprintf(
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_NAME"),
-		os.Getenv("DB_PORT"),
+		cfg.DBHost, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBPort,
 	)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("failed to connect database: %v", err)
+		pkg.Logger.Fatal("failed to connect database", zap.Error(err))
 	}
 
 	subscriptionRepo := repo.NewPostgresRepo(db)
-	smtpMailer := mail.NewSMTPMailerFromEnv()
+	smtpMailer := mail.NewSMTPMailer(
+		cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom, cfg.BaseURL,
+	)
+	weatherProvider := weatherapi.NewWeatherAPIProvider(cfg.WeatherAPIKey)
 	subService := service.NewSubscriptionService(subscriptionRepo, smtpMailer)
-	weatherProvider := weatherapi.NewWeatherAPIProviderFromEnv()
 	weatherService := service.NewWeatherService(weatherProvider)
 
 	c := cron.New()
 	c.AddFunc("0 * * * *", func() {
-		fmt.Println("Starting scheduled weather mail job...")
+		pkg.Logger.Info("Starting scheduled weather mail job...")
 		if err := scheduler.MailJob(subService, weatherService); err != nil {
-			fmt.Printf("Mail job failed: %v\n", err)
+			pkg.Logger.Error("Mail job failed", zap.Error(err))
 		} else {
-			fmt.Println("Weather mail job completed successfully")
+			pkg.Logger.Info("Weather mail job completed successfully")
 		}
 	})
 	c.Start()
@@ -52,8 +55,8 @@ func main() {
 	r := gin.Default()
 	handler.RegisterRoutes(r, subHandler)
 
-	fmt.Println("API server running on :8080")
+	pkg.Logger.Info("API server running", zap.String("addr", ":8080"))
 	if err := r.Run(":8080"); err != nil {
-		log.Fatalf("failed to run server: %v", err)
+		pkg.Logger.Fatal("failed to run server", zap.Error(err))
 	}
 }
