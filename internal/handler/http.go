@@ -3,27 +3,31 @@ package handler
 import (
 	"errors"
 	"github.com/gin-gonic/gin"
-	"github.com/l4ndm1nes/Weather-API-Application/internal/app/service"
+	"github.com/l4ndm1nes/Weather-API-Application/internal/model"
 	"gorm.io/gorm"
 	"net/http"
 )
 
-type SubscriptionHandler struct {
-	SubService     *service.SubscriptionService
-	WeatherService *service.WeatherService
+type SubscriptionService interface {
+	Subscribe(sub *model.Subscription) (*model.Subscription, error)
+	ConfirmSubscription(token string) error
+	Unsubscribe(token string) error
 }
 
-func NewSubscriptionHandler(subService *service.SubscriptionService, weatherService *service.WeatherService) *SubscriptionHandler {
+type WeatherService interface {
+	GetWeather(city string) (*model.Weather, error)
+}
+
+type SubscriptionHandler struct {
+	SubService     SubscriptionService
+	WeatherService WeatherService
+}
+
+func NewSubscriptionHandler(subService SubscriptionService, weatherService WeatherService) *SubscriptionHandler {
 	return &SubscriptionHandler{
 		SubService:     subService,
 		WeatherService: weatherService,
 	}
-}
-
-type SubscribeRequest struct {
-	Email     string `form:"email" json:"email" binding:"required,email"`
-	City      string `form:"city" json:"city" binding:"required"`
-	Frequency string `form:"frequency" json:"frequency" binding:"required,oneof=hourly daily"`
 }
 
 func (h *SubscriptionHandler) Subscribe(c *gin.Context) {
@@ -33,7 +37,7 @@ func (h *SubscriptionHandler) Subscribe(c *gin.Context) {
 		return
 	}
 
-	sub, err := h.SubService.Subscribe(req.Email, req.City, req.Frequency)
+	sub, err := h.SubService.Subscribe(ToDomainFromRequest(&req))
 	if err != nil {
 		if err.Error() == "email already subscribed" {
 			c.JSON(http.StatusConflict, gin.H{"error": "Email already subscribed"})
@@ -45,7 +49,7 @@ func (h *SubscriptionHandler) Subscribe(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":      "Subscription successful. Confirmation email sent.",
-		"subscription": sub,
+		"subscription": ToSubscribeResponse(sub),
 	})
 }
 
@@ -58,7 +62,7 @@ func (h *SubscriptionHandler) ConfirmSubscription(c *gin.Context) {
 
 	err := h.SubService.ConfirmSubscription(token)
 	if err != nil {
-		if errors.Is(err, service.ErrNotFound) {
+		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == "subscription not found" {
 			c.JSON(404, gin.H{"error": "Token not found"})
 		} else {
 			c.JSON(400, gin.H{"error": err.Error()})
@@ -82,7 +86,7 @@ func (h *SubscriptionHandler) GetWeather(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, weather)
+	c.JSON(http.StatusOK, ToWeatherResponse(weather))
 }
 
 func (h *SubscriptionHandler) Unsubscribe(c *gin.Context) {

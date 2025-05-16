@@ -1,8 +1,8 @@
 package repo
 
 import (
-	"github.com/l4ndm1nes/Weather-API-Application/internal/app/port"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/model"
+	"github.com/l4ndm1nes/Weather-API-Application/internal/service"
 	"gorm.io/gorm"
 )
 
@@ -14,29 +14,53 @@ func NewPostgresRepo(db *gorm.DB) *PostgresRepo {
 	return &PostgresRepo{db: db}
 }
 
-var _ port.SubscriptionRepository = (*PostgresRepo)(nil)
+var _ service.SubscriptionRepository = (*PostgresRepo)(nil)
 
 func (r *PostgresRepo) Create(sub *model.Subscription) error {
-	return r.db.Create(sub).Error
+	dbSub := ToDB(sub)
+	err := r.db.Create(dbSub).Error
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *PostgresRepo) FindByEmail(email string) (*model.Subscription, error) {
-	var sub model.Subscription
-	err := r.db.Where("email = ?", email).First(&sub).Error
+	var dbSub SubscriptionDB
+	err := r.db.Where("email = ?", email).First(&dbSub).Error
 	if err != nil {
 		return nil, err
 	}
-	return &sub, nil
+	return ToDomain(&dbSub), nil
 }
 
-func (r *PostgresRepo) ConfirmByToken(token string) error {
-	return r.db.Model(&model.Subscription{}).
-		Where("confirm_token = ?", token).
-		Update("confirmed", true).Error
+func (r *PostgresRepo) GetByToken(token string) (*model.Subscription, error) {
+	var dbSub SubscriptionDB
+	result := r.db.Where("confirm_token = ?", token).First(&dbSub)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return ToDomain(&dbSub), nil
+}
+
+func (r *PostgresRepo) Update(sub *model.Subscription) error {
+	return r.db.Save(ToDB(sub)).Error
+}
+
+func (r *PostgresRepo) GetAllConfirmed() ([]*model.Subscription, error) {
+	var dbSubs []SubscriptionDB
+	if err := r.db.Where("confirmed = ?", true).Find(&dbSubs).Error; err != nil {
+		return nil, err
+	}
+	var subs []*model.Subscription
+	for _, dbSub := range dbSubs {
+		subs = append(subs, ToDomain(&dbSub))
+	}
+	return subs, nil
 }
 
 func (r *PostgresRepo) UnsubscribeByToken(token string) error {
-	result := r.db.Where("unsubscribe_token = ?", token).Delete(&model.Subscription{})
+	result := r.db.Where("unsubscribe_token = ?", token).Delete(&SubscriptionDB{})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -44,17 +68,4 @@ func (r *PostgresRepo) UnsubscribeByToken(token string) error {
 		return gorm.ErrRecordNotFound
 	}
 	return nil
-}
-
-func (r *PostgresRepo) GetByToken(token string) (*model.Subscription, error) {
-	var sub model.Subscription
-	result := r.db.Where("confirm_token = ?", token).First(&sub)
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	return &sub, nil
-}
-
-func (r *PostgresRepo) Update(sub *model.Subscription) error {
-	return r.db.Save(sub).Error
 }

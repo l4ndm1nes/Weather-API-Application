@@ -7,7 +7,8 @@ CREATE TABLE subscriptions (
     confirm_token VARCHAR(255) NOT NULL,
     unsubscribe_token VARCHAR(255) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    last_sent_at TIMESTAMP NULL
 );
 
 CREATE INDEX idx_subscriptions_email ON subscriptions(email);

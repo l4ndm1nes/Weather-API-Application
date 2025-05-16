@@ -3,15 +3,18 @@ package main
 import (
 	"fmt"
 	"github.com/gin-gonic/gin"
-	mailer "github.com/l4ndm1nes/Weather-API-Application/internal/adapter/mail"
+	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/mail"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/repo"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/weatherapi"
-	"github.com/l4ndm1nes/Weather-API-Application/internal/app/service"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/handler"
+	"github.com/l4ndm1nes/Weather-API-Application/internal/scheduler"
+	"github.com/l4ndm1nes/Weather-API-Application/internal/service"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"log"
 	"os"
+
+	"github.com/robfig/cron/v3"
 )
 
 func main() {
@@ -29,14 +32,23 @@ func main() {
 	}
 
 	subscriptionRepo := repo.NewPostgresRepo(db)
-	smtpMailer := mailer.NewSMTPMailerFromEnv()
+	smtpMailer := mail.NewSMTPMailerFromEnv()
 	subService := service.NewSubscriptionService(subscriptionRepo, smtpMailer)
-
 	weatherProvider := weatherapi.NewWeatherAPIProviderFromEnv()
 	weatherService := service.NewWeatherService(weatherProvider)
 
-	subHandler := handler.NewSubscriptionHandler(subService, weatherService)
+	c := cron.New()
+	c.AddFunc("0 * * * *", func() {
+		fmt.Println("Starting scheduled weather mail job...")
+		if err := scheduler.MailJob(subService, weatherService); err != nil {
+			fmt.Printf("Mail job failed: %v\n", err)
+		} else {
+			fmt.Println("Weather mail job completed successfully")
+		}
+	})
+	c.Start()
 
+	subHandler := handler.NewSubscriptionHandler(subService, weatherService)
 	r := gin.Default()
 	handler.RegisterRoutes(r, subHandler)
 

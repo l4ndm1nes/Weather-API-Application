@@ -1,15 +1,18 @@
 package service
 
 import (
-	"github.com/l4ndm1nes/Weather-API-Application/internal/app/port"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/model"
 )
 
-type WeatherService struct {
-	Provider port.WeatherProvider
+type WeatherProvider interface {
+	GetWeather(city string) (*model.Weather, error)
 }
 
-func NewWeatherService(provider port.WeatherProvider) *WeatherService {
+type WeatherService struct {
+	Provider WeatherProvider
+}
+
+func NewWeatherService(provider WeatherProvider) *WeatherService {
 	return &WeatherService{Provider: provider}
 }
 
