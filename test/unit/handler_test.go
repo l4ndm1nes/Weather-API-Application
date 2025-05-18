@@ -8,6 +8,7 @@ import (
 	"github.com/l4ndm1nes/Weather-API-Application/internal/handler"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/mocks"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/model"
+	"github.com/l4ndm1nes/Weather-API-Application/pkg/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"gorm.io/gorm"
@@ -98,27 +99,27 @@ func TestSubscriptionHandler_ConfirmSubscription(t *testing.T) {
 	}{
 		{
 			name:  "success",
-			token: "tok123",
+			token: "e7b68c90-d69c-4df6-8a39-5e4e65bcb93c",
 			mockSetup: func(svc *mocks.SubscriptionService) {
-				svc.On("ConfirmSubscription", "tok123").Return(nil)
+				svc.On("ConfirmSubscription", "e7b68c90-d69c-4df6-8a39-5e4e65bcb93c").Return(nil)
 			},
 			wantStatus:     http.StatusOK,
 			wantInResponse: "Subscription confirmed",
 		},
 		{
 			name:  "not found",
-			token: "notfound",
+			token: "bcd6f6b3-7ee5-41e3-9e01-b8a4beac5b0b",
 			mockSetup: func(svc *mocks.SubscriptionService) {
-				svc.On("ConfirmSubscription", "notfound").Return(errors.New("subscription not found"))
+				svc.On("ConfirmSubscription", "bcd6f6b3-7ee5-41e3-9e01-b8a4beac5b0b").Return(errors.New("subscription not found"))
 			},
 			wantStatus:     http.StatusNotFound,
 			wantInResponse: "Token not found",
 		},
 		{
 			name:  "already confirmed",
-			token: "already",
+			token: "7ad3be55-32fa-44f2-bf9a-4e8e8e735e0d",
 			mockSetup: func(svc *mocks.SubscriptionService) {
-				svc.On("ConfirmSubscription", "already").Return(errors.New("already confirmed"))
+				svc.On("ConfirmSubscription", "7ad3be55-32fa-44f2-bf9a-4e8e8e735e0d").Return(errors.New("already confirmed"))
 			},
 			wantStatus:     http.StatusBadRequest,
 			wantInResponse: "already confirmed",
@@ -141,7 +142,7 @@ func TestSubscriptionHandler_ConfirmSubscription(t *testing.T) {
 			h := handler.NewSubscriptionHandler(subMock, weatherMock)
 
 			r := gin.Default()
-			r.GET("/confirm/:token", h.ConfirmSubscription)
+			r.GET("/confirm/:token", middleware.TokenUUIDRequiredMiddleware("token"), h.ConfirmSubscription)
 			url := "/confirm/" + tc.token
 			req := httptest.NewRequest(http.MethodGet, url, nil)
 			w := httptest.NewRecorder()
@@ -184,11 +185,18 @@ func TestSubscriptionHandler_GetWeather(t *testing.T) {
 			wantInResponse: "City not found",
 		},
 		{
-			name:           "missing city",
+			name:           "city missing",
 			queryCity:      "",
 			mockSetup:      func(ws *mocks.WeatherService) {},
 			wantStatus:     http.StatusBadRequest,
 			wantInResponse: "city is required",
+		},
+		{
+			name:           "city not latin",
+			queryCity:      "Київ",
+			mockSetup:      func(ws *mocks.WeatherService) {},
+			wantStatus:     http.StatusBadRequest,
+			wantInResponse: "city must be in Latin letters",
 		},
 	}
 
@@ -201,7 +209,10 @@ func TestSubscriptionHandler_GetWeather(t *testing.T) {
 			h := handler.NewSubscriptionHandler(subMock, weatherMock)
 
 			r := gin.Default()
-			r.GET("/weather", h.GetWeather)
+			r.GET("/weather",
+				middleware.QueryParamRequiredMiddleware("city", middleware.LatinOnlyRegex),
+				h.GetWeather,
+			)
 			req := httptest.NewRequest(http.MethodGet, "/weather?city="+tc.queryCity, nil)
 			w := httptest.NewRecorder()
 
@@ -222,18 +233,18 @@ func TestSubscriptionHandler_Unsubscribe(t *testing.T) {
 	}{
 		{
 			name:  "success",
-			token: "goodtoken",
+			token: "5f2a17b1-110c-4881-bc19-41c3edaa0657",
 			mockSetup: func(svc *mocks.SubscriptionService) {
-				svc.On("Unsubscribe", "goodtoken").Return(nil)
+				svc.On("Unsubscribe", "5f2a17b1-110c-4881-bc19-41c3edaa0657").Return(nil)
 			},
 			wantStatus:     http.StatusOK,
 			wantInResponse: "Unsubscribed successfully",
 		},
 		{
 			name:  "token not found",
-			token: "notfound",
+			token: "dfc16b26-842a-4c8e-b31c-53c6a29360e6",
 			mockSetup: func(svc *mocks.SubscriptionService) {
-				svc.On("Unsubscribe", "notfound").Return(gorm.ErrRecordNotFound)
+				svc.On("Unsubscribe", "dfc16b26-842a-4c8e-b31c-53c6a29360e6").Return(gorm.ErrRecordNotFound)
 			},
 			wantStatus:     http.StatusNotFound,
 			wantInResponse: "Token not found",
@@ -256,7 +267,7 @@ func TestSubscriptionHandler_Unsubscribe(t *testing.T) {
 			h := handler.NewSubscriptionHandler(subMock, weatherMock)
 
 			r := gin.Default()
-			r.GET("/unsubscribe/:token", h.Unsubscribe)
+			r.GET("/unsubscribe/:token", middleware.TokenUUIDRequiredMiddleware("token"), h.Unsubscribe)
 			url := "/unsubscribe/" + tc.token
 			req := httptest.NewRequest(http.MethodGet, url, nil)
 			w := httptest.NewRecorder()

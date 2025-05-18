@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/mail"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/repo"
@@ -19,8 +20,11 @@ import (
 
 func main() {
 	pkg.InitLogger()
-	defer pkg.Logger.Sync()
-
+	defer func() {
+		if err := pkg.Logger.Sync(); err != nil {
+			fmt.Printf("failed to sync logger: %v\n", err)
+		}
+	}()
 	cfg := config.LoadConfig()
 
 	dsn := fmt.Sprintf(
@@ -41,18 +45,29 @@ func main() {
 	weatherService := service.NewWeatherService(weatherProvider)
 
 	c := cron.New()
-	c.AddFunc("0 * * * *", func() {
+	if _, err := c.AddFunc("0 * * * *", func() {
 		pkg.Logger.Info("Starting scheduled weather mail job...")
 		if err := scheduler.MailJob(subService, weatherService); err != nil {
 			pkg.Logger.Error("Mail job failed", zap.Error(err))
 		} else {
 			pkg.Logger.Info("Weather mail job completed successfully")
 		}
-	})
+	}); err != nil {
+		pkg.Logger.Fatal("failed to add cron job", zap.Error(err))
+	}
 	c.Start()
 
 	subHandler := handler.NewSubscriptionHandler(subService, weatherService)
+
 	r := gin.Default()
+
+	r.Use(cors.Default())
+	r.Static("/static", "./web/static")
+
+	r.GET("/", func(c *gin.Context) {
+		c.File("./web/static/index.html")
+	})
+
 	handler.RegisterRoutes(r, subHandler)
 
 	pkg.Logger.Info("API server running", zap.String("addr", ":8080"))

@@ -12,6 +12,7 @@ import (
 	"github.com/l4ndm1nes/Weather-API-Application/internal/model"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/service"
 	"github.com/l4ndm1nes/Weather-API-Application/pkg"
+	"github.com/l4ndm1nes/Weather-API-Application/pkg/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -77,7 +78,11 @@ func setupPostgresContainer(ctx context.Context, t *testing.T) (testcontainers.C
 func TestSubscribe_Integration(t *testing.T) {
 	ctx := context.Background()
 	pgC, dsn := setupPostgresContainer(ctx, t)
-	defer pgC.Terminate(ctx)
+	defer func() {
+		if err := pgC.Terminate(ctx); err != nil {
+			t.Logf("failed to terminate container: %v", err)
+		}
+	}()
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	assert.NoError(t, err)
@@ -91,7 +96,7 @@ func TestSubscribe_Integration(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.POST("/api/subscribe", subHandler.Subscribe)
+	r.POST("/api/subscribe", middleware.CityLatinOnlyBodyMiddleware(), subHandler.Subscribe)
 
 	type testCase struct {
 		name         string
@@ -134,6 +139,17 @@ func TestSubscribe_Integration(t *testing.T) {
 			wantContains: "oneof",
 			wantInDb:     false,
 		},
+		{
+			name: "city not latin",
+			body: map[string]string{
+				"email":     "test@latin.com",
+				"city":      "Київ",
+				"frequency": "daily",
+			},
+			wantCode:     http.StatusBadRequest,
+			wantContains: "city must be in Latin letters",
+			wantInDb:     false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -160,36 +176,37 @@ func TestSubscribe_Integration(t *testing.T) {
 
 func TestConfirmSubscription_Integration(t *testing.T) {
 	ctx := context.Background()
-
 	pgC, dsn := setupPostgresContainer(ctx, t)
-	defer pgC.Terminate(ctx)
+	defer func() {
+		if err := pgC.Terminate(ctx); err != nil {
+			t.Logf("failed to terminate container: %v", err)
+		}
+	}()
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	assert.NoError(t, err)
-	err = db.AutoMigrate(&repo.SubscriptionDB{})
-	assert.NoError(t, err)
+	assert.NoError(t, db.AutoMigrate(&repo.SubscriptionDB{}))
 
 	subscriptionRepo := repo.NewPostgresRepo(db)
 	mailer := &dummyMailer{}
 	subService := service.NewSubscriptionService(subscriptionRepo, mailer)
-	handlerSub := handler.NewSubscriptionHandler(subService, nil)
+	subHandler := handler.NewSubscriptionHandler(subService, nil)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.GET("/api/confirm/:token", handlerSub.ConfirmSubscription)
+	r.GET("/api/confirm/:token", middleware.TokenUUIDRequiredMiddleware("token"), subHandler.ConfirmSubscription)
 
-	token := "test-token-123"
+	validToken := "550e8400-e29b-41d4-a716-446655440000"
 	sub := &repo.SubscriptionDB{
 		Email:        "confirmtest@email.com",
 		City:         "Kyiv",
 		Frequency:    "daily",
-		ConfirmToken: token,
+		ConfirmToken: validToken,
 		Confirmed:    false,
 	}
-	err = db.Create(sub).Error
-	assert.NoError(t, err)
+	assert.NoError(t, db.Create(sub).Error)
 
-	alreadyToken := "already-token"
+	alreadyToken := "123e4567-e89b-12d3-a456-426614174000"
 	alreadySub := &repo.SubscriptionDB{
 		Email:        "already@email.com",
 		City:         "Lviv",
@@ -197,8 +214,7 @@ func TestConfirmSubscription_Integration(t *testing.T) {
 		ConfirmToken: alreadyToken,
 		Confirmed:    true,
 	}
-	err = db.Create(alreadySub).Error
-	assert.NoError(t, err)
+	assert.NoError(t, db.Create(alreadySub).Error)
 
 	tests := []struct {
 		name           string
@@ -209,7 +225,7 @@ func TestConfirmSubscription_Integration(t *testing.T) {
 	}{
 		{
 			name:           "valid token",
-			token:          token,
+			token:          validToken,
 			wantCode:       http.StatusOK,
 			wantInResponse: "Subscription confirmed successfully",
 			confirmCheck:   &sub.Email,
@@ -223,7 +239,7 @@ func TestConfirmSubscription_Integration(t *testing.T) {
 		},
 		{
 			name:           "not found",
-			token:          "not-exist-token",
+			token:          "b472a266-d0bf-4ebd-94a8-6a9655cdd8b3",
 			wantCode:       http.StatusNotFound,
 			wantInResponse: "Token not found",
 			confirmCheck:   nil,
@@ -246,13 +262,12 @@ func TestConfirmSubscription_Integration(t *testing.T) {
 			req := httptest.NewRequest("GET", url, nil)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
-
 			assert.Equal(t, tc.wantCode, w.Code)
 			assert.Contains(t, w.Body.String(), tc.wantInResponse)
 
 			if tc.confirmCheck != nil && tc.wantCode == http.StatusOK {
 				var updated repo.SubscriptionDB
-				err = db.First(&updated, "email = ?", *tc.confirmCheck).Error
+				err := db.First(&updated, "email = ?", *tc.confirmCheck).Error
 				assert.NoError(t, err)
 				assert.True(t, updated.Confirmed)
 			}
@@ -262,21 +277,23 @@ func TestConfirmSubscription_Integration(t *testing.T) {
 
 func TestUnsubscribe_Integration(t *testing.T) {
 	ctx := context.Background()
-
 	pgC, dsn := setupPostgresContainer(ctx, t)
-	defer pgC.Terminate(ctx)
+	defer func() {
+		if err := pgC.Terminate(ctx); err != nil {
+			t.Logf("failed to terminate container: %v", err)
+		}
+	}()
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	assert.NoError(t, err)
-	err = db.AutoMigrate(&repo.SubscriptionDB{})
-	assert.NoError(t, err)
+	assert.NoError(t, db.AutoMigrate(&repo.SubscriptionDB{}))
 
 	subscriptionRepo := repo.NewPostgresRepo(db)
 	mailer := &dummyMailer{}
 	subService := service.NewSubscriptionService(subscriptionRepo, mailer)
-	handlerSub := handler.NewSubscriptionHandler(subService, nil)
+	subHandler := handler.NewSubscriptionHandler(subService, nil)
 
-	unsubToken := "unsub-token-123"
+	unsubToken := "ae7b31ab-7b5b-4be0-8f89-7e0a9c872f0d"
 	sub := &repo.SubscriptionDB{
 		Email:            "unsubscribe@email.com",
 		City:             "Kyiv",
@@ -284,8 +301,11 @@ func TestUnsubscribe_Integration(t *testing.T) {
 		UnsubscribeToken: unsubToken,
 		Confirmed:        true,
 	}
-	err = db.Create(sub).Error
-	assert.NoError(t, err)
+	assert.NoError(t, db.Create(sub).Error)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.Default()
+	r.GET("/api/unsubscribe/:token", middleware.TokenUUIDRequiredMiddleware("token"), subHandler.Unsubscribe)
 
 	tests := []struct {
 		name           string
@@ -303,7 +323,7 @@ func TestUnsubscribe_Integration(t *testing.T) {
 		},
 		{
 			name:           "not found",
-			token:          "not-found-token",
+			token:          "fc8d3f99-2c1a-4447-bb67-222fae930842",
 			wantCode:       http.StatusNotFound,
 			wantInResponse: "Token not found",
 			checkDeleted:   false,
@@ -317,10 +337,6 @@ func TestUnsubscribe_Integration(t *testing.T) {
 		},
 	}
 
-	gin.SetMode(gin.TestMode)
-	r := gin.Default()
-	r.GET("/api/unsubscribe/:token", handlerSub.Unsubscribe)
-
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			url := "/api/unsubscribe/"
@@ -330,13 +346,12 @@ func TestUnsubscribe_Integration(t *testing.T) {
 			req := httptest.NewRequest("GET", url, nil)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
-
 			assert.Equal(t, tc.wantCode, w.Code)
 			assert.Contains(t, w.Body.String(), tc.wantInResponse)
 
 			if tc.checkDeleted {
 				var check repo.SubscriptionDB
-				err = db.First(&check, "email = ?", "unsubscribe@email.com").Error
+				err := db.First(&check, "email = ?", "unsubscribe@email.com").Error
 				assert.Error(t, err)
 				assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
 			}
@@ -347,12 +362,15 @@ func TestUnsubscribe_Integration(t *testing.T) {
 func TestGetWeather_Integration(t *testing.T) {
 	ctx := context.Background()
 	pgC, dsn := setupPostgresContainer(ctx, t)
-	defer pgC.Terminate(ctx)
+	defer func() {
+		if err := pgC.Terminate(ctx); err != nil {
+			t.Logf("failed to terminate container: %v", err)
+		}
+	}()
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	assert.NoError(t, err)
-	err = db.AutoMigrate(&repo.SubscriptionDB{})
-	assert.NoError(t, err)
+	assert.NoError(t, db.AutoMigrate(&repo.SubscriptionDB{}))
 
 	subscriptionRepo := repo.NewPostgresRepo(db)
 	mailer := &dummyMailer{}
@@ -363,7 +381,10 @@ func TestGetWeather_Integration(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.GET("/api/weather", subHandler.GetWeather)
+	r.GET("/api/weather",
+		middleware.QueryParamRequiredMiddleware("city", middleware.LatinOnlyRegex),
+		subHandler.GetWeather,
+	)
 
 	tests := []struct {
 		name           string
@@ -388,6 +409,12 @@ func TestGetWeather_Integration(t *testing.T) {
 			url:            "/api/weather",
 			wantStatus:     http.StatusBadRequest,
 			wantInResponse: "city is required",
+		},
+		{
+			name:           "city not latin",
+			url:            "/api/weather?city=Київ",
+			wantStatus:     http.StatusBadRequest,
+			wantInResponse: "city must be in Latin letters",
 		},
 	}
 

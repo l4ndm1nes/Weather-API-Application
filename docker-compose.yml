@@ -5,9 +5,9 @@ services:
     image: postgres:15
     restart: always
     environment:
-      POSTGRES_DB: weather
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -17,10 +17,12 @@ services:
     image: migrate/migrate
     depends_on:
       - db
-    entrypoint: ["/bin/sh", "-c", "/scripts/wait-for-postgres.sh db 5432 postgres && migrate -path /migrations -database 'postgres://postgres:postgres@db:5432/weather?sslmode=disable' up"]
+    entrypoint: ["/bin/sh", "-c", "/scripts/wait-for-postgres.sh db 5432 ${DB_USER} && migrate -path /migrations -database 'postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}?sslmode=disable' up"]
     volumes:
       - ./migrations:/migrations
       - ./scripts:/scripts
+    env_file:
+      - .env
 
   app:
     build: .
@@ -33,7 +35,7 @@ services:
       - "8080:8080"
     volumes:
       - ./scripts:/scripts
-    command: ["/bin/sh", "-c", "/scripts/wait-for-postgres.sh db 5432 postgres && ./weather-api-application"]
+    command: ["/bin/sh", "-c", "/scripts/wait-for-postgres.sh db 5432 ${DB_USER} && ./weather-api-application"]
 
 volumes:
   db_data:

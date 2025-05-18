@@ -7,5 +7,6 @@ RUN go build -o weather-api-application ./cmd/httpserver
 FROM alpine:3.18
 WORKDIR /app
 COPY --from=builder /app/weather-api-application .
+COPY web/static ./web/static
 EXPOSE 8080
 CMD ["./weather-api-application"]

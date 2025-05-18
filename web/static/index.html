@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Weather Subscription</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f3f3f3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: #fff;
+            border-radius: 12px;
+            padding: 32px 28px;
+            box-shadow: 0 0 12px #0001;
+            min-width: 320px;
+            max-width: 400px;
+        }
+        h2 { text-align: center; margin-bottom: 18px; }
+        label { display: block; margin-bottom: 6px; font-weight: 500;}
+        input, select {
+            width: 100%;
+            padding: 9px;
+            border-radius: 6px;
+            border: 1px solid #bbb;
+            margin-bottom: 16px;
+            font-size: 1rem;
+        }
+        button {
+            width: 100%;
+            padding: 11px 0;
+            background: #0c6cf2;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 1.05rem;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .msg {
+            margin-top: 18px;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        .msg.success { background: #d4edda; color: #235a23; }
+        .msg.error   { background: #f8d7da; color: #842029; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>Subscribe for Weather Updates</h2>
+    <form id="subscribeForm">
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" required placeholder="Enter your email">
+
+        <label for="city">City:</label>
+        <input type="text" id="city" name="city" required placeholder="e.g. Kyiv">
+
+        <label for="frequency">Frequency:</label>
+        <select id="frequency" name="frequency" required>
+            <option value="daily">Daily</option>
+            <option value="hourly">Hourly</option>
+        </select>
+
+        <button type="submit">Subscribe</button>
+    </form>
+    <div id="result" class="msg" style="display:none"></div>
+</div>
+
+<script>
+    document.getElementById('subscribeForm').addEventListener('submit', async function(event) {
+        event.preventDefault();
+        const resultDiv = document.getElementById('result');
+        resultDiv.style.display = 'none';
+        resultDiv.textContent = '';
+        resultDiv.className = 'msg';
+
+        const payload = {
+            email: document.getElementById('email').value,
+            city: document.getElementById('city').value,
+            frequency: document.getElementById('frequency').value
+        };
+
+        try {
+            const resp = await fetch('/api/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await resp.json();
+
+            if (resp.ok) {
+                resultDiv.textContent = data.message || 'Subscription successful!';
+                resultDiv.className += ' success';
+            } else {
+                resultDiv.textContent = data.error || 'An error occurred';
+                resultDiv.className += ' error';
+            }
+            resultDiv.style.display = 'block';
+        } catch (err) {
+            resultDiv.textContent = 'Network error. Please try again.';
+            resultDiv.className += ' error';
+            resultDiv.style.display = 'block';
+        }
+    });
+</script>
+</body>
+</html>
