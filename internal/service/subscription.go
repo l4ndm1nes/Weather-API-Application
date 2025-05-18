@@ -1,10 +1,9 @@
 package service
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/model"
 	"github.com/l4ndm1nes/Weather-API-Application/pkg"
 	"go.uber.org/zap"
@@ -36,13 +35,7 @@ func NewSubscriptionService(repo SubscriptionRepository, mailer Mailer) *Subscri
 }
 
 func generateToken() (string, error) {
-	b := make([]byte, 16)
-	_, err := rand.Read(b)
-	if err != nil {
-		pkg.Logger.Error("failed to generate random bytes for token", zap.Error(err))
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
+	return uuid.New().String(), nil
 }
 
 func (s *SubscriptionService) Subscribe(sub *model.Subscription) (*model.Subscription, error) {
