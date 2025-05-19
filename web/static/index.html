@@ -93,15 +93,20 @@
                 body: JSON.stringify(payload)
             });
 
-            const data = await resp.json();
-
-            if (resp.ok) {
-                resultDiv.textContent = data.message || 'Subscription successful!';
+            if (resp.status === 200) {
+                resultDiv.textContent = 'Subscription successful. Confirmation email sent.';
                 resultDiv.className += ' success';
+            } else if (resp.status === 400) {
+                resultDiv.textContent = 'Invalid input. Please check your data.';
+                resultDiv.className += ' error';
+            } else if (resp.status === 409) {
+                resultDiv.textContent = 'Email already subscribed.';
+                resultDiv.className += ' error';
             } else {
-                resultDiv.textContent = data.error || 'An error occurred';
+                resultDiv.textContent = 'An unexpected error occurred.';
                 resultDiv.className += ' error';
             }
+
             resultDiv.style.display = 'block';
         } catch (err) {
             resultDiv.textContent = 'Network error. Please try again.';

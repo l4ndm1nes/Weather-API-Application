@@ -85,11 +85,13 @@ func (s *SubscriptionService) ConfirmSubscription(token string) error {
 	sub, err := s.Repo.GetByToken(token)
 	if err != nil {
 		pkg.Logger.Error("failed to get subscription by token", zap.String("token", token), zap.Error(err))
-		return ErrNotFound
+		return errors.New("subscription not found")
 	}
+
 	if sub.Confirmed {
 		return errors.New("already confirmed")
 	}
+
 	sub.Confirmed = true
 	if err := s.Repo.Update(sub); err != nil {
 		pkg.Logger.Error("failed to update subscription as confirmed", zap.Error(err))

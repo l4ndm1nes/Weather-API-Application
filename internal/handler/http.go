@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"gorm.io/gorm"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -33,61 +35,77 @@ func NewSubscriptionHandler(subService SubscriptionService, weatherService Weath
 func (h *SubscriptionHandler) Subscribe(c *gin.Context) {
 	var req SubscribeRequest
 	if err := c.ShouldBind(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error(), err)
+		respondError(c, http.StatusBadRequest, "Invalid input", err)
 		return
 	}
-
-	sub, err := h.SubService.Subscribe(ToDomainFromRequest(&req))
+	_, err := h.SubService.Subscribe(ToDomainFromRequest(&req))
 	if err != nil {
 		if err.Error() == "email already subscribed" {
 			respondError(c, http.StatusConflict, "Email already subscribed", err)
 		} else {
-			respondError(c, http.StatusBadRequest, err.Error(), err)
+			respondError(c, http.StatusBadRequest, "Invalid input", err)
 		}
 		return
 	}
 
-	respondSuccess(c, http.StatusOK, gin.H{
-		"message":      "Subscription successful. Confirmation email sent.",
-		"subscription": ToSubscribeResponse(sub),
-	})
+	respondSuccess(c, http.StatusOK, nil)
 }
 
 func (h *SubscriptionHandler) ConfirmSubscription(c *gin.Context) {
 	token, ok := getStringFromCtx(c, "token")
 	if !ok {
+		respondError(c, http.StatusBadRequest, "Invalid token", nil)
 		return
 	}
+
 	err := h.SubService.ConfirmSubscription(token)
-	if err == nil {
-		respondSuccess(c, http.StatusOK, gin.H{"message": "Subscription confirmed successfully"})
+	if err != nil {
+		if err.Error() == "already confirmed" {
+			respondError(c, http.StatusBadRequest, "Subscription already confirmed", nil)
+		} else if err.Error() == "subscription not found" {
+			respondError(c, http.StatusNotFound, "Token not found", err)
+		} else {
+			respondError(c, http.StatusBadRequest, "Error confirming subscription", err)
+		}
 		return
 	}
-	handleServiceError(c, err, "Token not found", "already confirmed")
+
+	respondSuccess(c, http.StatusOK, nil)
 }
 
 func (h *SubscriptionHandler) Unsubscribe(c *gin.Context) {
 	token, ok := getStringFromCtx(c, "token")
 	if !ok {
+		respondError(c, http.StatusBadRequest, "Invalid token", nil)
 		return
 	}
+
 	err := h.SubService.Unsubscribe(token)
 	if err == nil {
-		respondSuccess(c, http.StatusOK, gin.H{"message": "Unsubscribed successfully"})
+		respondSuccess(c, http.StatusOK, nil)
 		return
 	}
-	handleServiceError(c, err, "Token not found", "")
+
+	if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == "subscription not found" {
+		respondError(c, http.StatusNotFound, "Token not found", err)
+		return
+	}
+
+	respondError(c, http.StatusBadRequest, "Error unsubscribing", err)
 }
 
 func (h *SubscriptionHandler) GetWeather(c *gin.Context) {
-	city, ok := getStringFromCtx(c, "city")
-	if !ok {
+	city := c.Query("city")
+	if city == "" {
+		respondError(c, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
 	weather, err := h.WeatherService.GetWeather(city)
 	if err == nil {
-		respondSuccess(c, http.StatusOK, gin.H{
-			"weather": ToWeatherResponse(weather),
+		c.JSON(http.StatusOK, gin.H{
+			"temperature": weather.Temperature,
+			"humidity":    weather.Humidity,
+			"description": weather.Description,
 		})
 		return
 	}
@@ -97,15 +115,15 @@ func (h *SubscriptionHandler) GetWeather(c *gin.Context) {
 func RegisterRoutes(r *gin.Engine, subHandler *SubscriptionHandler) {
 	api := r.Group("/api")
 	{
-		api.POST("/subscribe",
-			middleware.CityLatinOnlyBodyMiddleware(),
-			subHandler.Subscribe,
+		api.POST("/subscribe", subHandler.Subscribe)
+		api.GET("/weather", subHandler.GetWeather)
+		api.GET("/confirm/:token",
+			middleware.TokenUUIDRequiredMiddleware("token", "Invalid token"),
+			subHandler.ConfirmSubscription,
 		)
-		api.GET("/weather",
-			middleware.QueryParamRequiredMiddleware("city", middleware.LatinOnlyRegex),
-			subHandler.GetWeather,
+		api.GET("/unsubscribe/:token",
+			middleware.TokenUUIDRequiredMiddleware("token", "Invalid token"),
+			subHandler.Unsubscribe,
 		)
-		api.GET("/confirm/:token", middleware.TokenUUIDRequiredMiddleware("token"), subHandler.ConfirmSubscription)
-		api.GET("/unsubscribe/:token", middleware.TokenUUIDRequiredMiddleware("token"), subHandler.Unsubscribe)
 	}
 }

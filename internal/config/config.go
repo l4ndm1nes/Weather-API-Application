@@ -12,6 +12,7 @@ type Config struct {
 	DBUser        string
 	DBPassword    string
 	DBName        string
+	DB_SSLMODE    string
 	SMTPHost      string
 	SMTPPort      string
 	SMTPUser      string
@@ -41,6 +42,7 @@ func LoadConfig() *Config {
 		DBUser:        getEnv("DB_USER", ""),
 		DBPassword:    getEnv("DB_PASSWORD", ""),
 		DBName:        getEnv("DB_NAME", ""),
+		DB_SSLMODE:    getEnv("DB_SSLMODE", ""),
 		SMTPHost:      getEnv("SMTP_HOST", ""),
 		SMTPPort:      getEnv("SMTP_PORT", "587"),
 		SMTPUser:      getEnv("SMTP_USER", ""),

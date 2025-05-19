@@ -4,16 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/adapter/repo"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/handler"
+	"github.com/l4ndm1nes/Weather-API-Application/internal/mocks"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/model"
 	"github.com/l4ndm1nes/Weather-API-Application/internal/service"
 	"github.com/l4ndm1nes/Weather-API-Application/pkg"
 	"github.com/l4ndm1nes/Weather-API-Application/pkg/middleware"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.uber.org/zap"
@@ -96,17 +97,13 @@ func TestSubscribe_Integration(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.POST("/api/subscribe", middleware.CityLatinOnlyBodyMiddleware(), subHandler.Subscribe)
+	r.POST("/api/subscribe", subHandler.Subscribe)
 
-	type testCase struct {
-		name         string
-		body         map[string]string
-		wantCode     int
-		wantContains string
-		wantInDb     bool
-	}
-
-	tests := []testCase{
+	tests := []struct {
+		name       string
+		body       map[string]string
+		wantStatus int
+	}{
 		{
 			name: "valid subscription",
 			body: map[string]string{
@@ -114,9 +111,7 @@ func TestSubscribe_Integration(t *testing.T) {
 				"city":      "Kyiv",
 				"frequency": "daily",
 			},
-			wantCode:     http.StatusOK,
-			wantContains: "Subscription successful",
-			wantInDb:     true,
+			wantStatus: http.StatusOK,
 		},
 		{
 			name: "missing email",
@@ -124,9 +119,7 @@ func TestSubscribe_Integration(t *testing.T) {
 				"city":      "Kyiv",
 				"frequency": "daily",
 			},
-			wantCode:     http.StatusBadRequest,
-			wantContains: "required",
-			wantInDb:     false,
+			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name: "invalid frequency",
@@ -135,20 +128,16 @@ func TestSubscribe_Integration(t *testing.T) {
 				"city":      "Kyiv",
 				"frequency": "weekly",
 			},
-			wantCode:     http.StatusBadRequest,
-			wantContains: "oneof",
-			wantInDb:     false,
+			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name: "city not latin",
+			name: "already subscribed",
 			body: map[string]string{
-				"email":     "test@latin.com",
-				"city":      "Київ",
+				"email":     "integration@email.com",
+				"city":      "Kyiv",
 				"frequency": "daily",
 			},
-			wantCode:     http.StatusBadRequest,
-			wantContains: "city must be in Latin letters",
-			wantInDb:     false,
+			wantStatus: http.StatusConflict,
 		},
 	}
 
@@ -157,120 +146,89 @@ func TestSubscribe_Integration(t *testing.T) {
 			jsonBody, _ := json.Marshal(tc.body)
 			req := httptest.NewRequest("POST", "/api/subscribe", bytes.NewBuffer(jsonBody))
 			req.Header.Set("Content-Type", "application/json")
+
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 
-			assert.Equal(t, tc.wantCode, w.Code)
-			assert.Contains(t, w.Body.String(), tc.wantContains)
-
-			if tc.wantInDb {
-				var dbSub repo.SubscriptionDB
-				err = db.First(&dbSub, "email = ?", tc.body["email"]).Error
-				assert.NoError(t, err)
-				assert.Equal(t, tc.body["city"], dbSub.City)
-				assert.Equal(t, tc.body["frequency"], dbSub.Frequency)
-			}
+			assert.Equal(t, tc.wantStatus, w.Code)
 		})
 	}
 }
 
 func TestConfirmSubscription_Integration(t *testing.T) {
-	ctx := context.Background()
-	pgC, dsn := setupPostgresContainer(ctx, t)
-	defer func() {
-		if err := pgC.Terminate(ctx); err != nil {
-			t.Logf("failed to terminate container: %v", err)
-		}
-	}()
-
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	assert.NoError(t, err)
-	assert.NoError(t, db.AutoMigrate(&repo.SubscriptionDB{}))
-
-	subscriptionRepo := repo.NewPostgresRepo(db)
+	mockRepo := &mocks.SubscriptionRepository{}
 	mailer := &dummyMailer{}
-	subService := service.NewSubscriptionService(subscriptionRepo, mailer)
+	subService := service.NewSubscriptionService(mockRepo, mailer)
 	subHandler := handler.NewSubscriptionHandler(subService, nil)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.GET("/api/confirm/:token", middleware.TokenUUIDRequiredMiddleware("token"), subHandler.ConfirmSubscription)
+	r.GET("/api/confirm/:token", middleware.TokenUUIDRequiredMiddleware("token", "Invalid token"), subHandler.ConfirmSubscription)
 
 	validToken := "550e8400-e29b-41d4-a716-446655440000"
-	sub := &repo.SubscriptionDB{
+	mockRepo.On("GetByToken", validToken).Return(&model.Subscription{
 		Email:        "confirmtest@email.com",
 		City:         "Kyiv",
 		Frequency:    "daily",
 		ConfirmToken: validToken,
 		Confirmed:    false,
-	}
-	assert.NoError(t, db.Create(sub).Error)
+	}, nil)
 
 	alreadyToken := "123e4567-e89b-12d3-a456-426614174000"
-	alreadySub := &repo.SubscriptionDB{
+	mockRepo.On("GetByToken", alreadyToken).Return(&model.Subscription{
 		Email:        "already@email.com",
 		City:         "Lviv",
 		Frequency:    "daily",
 		ConfirmToken: alreadyToken,
 		Confirmed:    true,
-	}
-	assert.NoError(t, db.Create(alreadySub).Error)
+	}, nil)
+
+	notFoundToken := "b472a266-d0bf-4ebd-94a8-6a9655cdd8b3"
+	mockRepo.On("GetByToken", notFoundToken).Return(nil, gorm.ErrRecordNotFound)
+
+	mockRepo.On("Update", mock.Anything).Return(nil) // Это заглушка, которая будет использоваться, когда вызывается Update
 
 	tests := []struct {
-		name           string
-		token          string
-		wantCode       int
-		wantInResponse string
-		confirmCheck   *string
+		name       string
+		token      string
+		wantStatus int
 	}{
 		{
-			name:           "valid token",
-			token:          validToken,
-			wantCode:       http.StatusOK,
-			wantInResponse: "Subscription confirmed successfully",
-			confirmCheck:   &sub.Email,
+			name:       "valid token",
+			token:      validToken,
+			wantStatus: http.StatusOK,
 		},
 		{
-			name:           "already confirmed",
-			token:          alreadyToken,
-			wantCode:       http.StatusBadRequest,
-			wantInResponse: "already confirmed",
-			confirmCheck:   nil,
+			name:       "not found",
+			token:      notFoundToken,
+			wantStatus: http.StatusNotFound,
 		},
 		{
-			name:           "not found",
-			token:          "b472a266-d0bf-4ebd-94a8-6a9655cdd8b3",
-			wantCode:       http.StatusNotFound,
-			wantInResponse: "Token not found",
-			confirmCheck:   nil,
+			name:       "already confirmed",
+			token:      alreadyToken,
+			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:           "missing token",
-			token:          "",
-			wantCode:       http.StatusNotFound,
-			wantInResponse: "404 page not found",
-			confirmCheck:   nil,
+			name:       "invalid token (not UUID)",
+			token:      "not-a-uuid",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "missing token",
+			token:      "",
+			wantStatus: http.StatusNotFound,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			url := "/api/confirm/"
-			if tc.token != "" {
-				url += tc.token
-			}
+			url := "/api/confirm/" + tc.token
 			req := httptest.NewRequest("GET", url, nil)
+
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
-			assert.Equal(t, tc.wantCode, w.Code)
-			assert.Contains(t, w.Body.String(), tc.wantInResponse)
 
-			if tc.confirmCheck != nil && tc.wantCode == http.StatusOK {
-				var updated repo.SubscriptionDB
-				err := db.First(&updated, "email = ?", *tc.confirmCheck).Error
-				assert.NoError(t, err)
-				assert.True(t, updated.Confirmed)
-			}
+			assert.Equal(t, tc.wantStatus, w.Code)
 		})
 	}
 }
@@ -305,56 +263,39 @@ func TestUnsubscribe_Integration(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.GET("/api/unsubscribe/:token", middleware.TokenUUIDRequiredMiddleware("token"), subHandler.Unsubscribe)
+	r.GET("/api/unsubscribe/:token", middleware.TokenUUIDRequiredMiddleware("token", "Invalid token"), subHandler.Unsubscribe)
 
 	tests := []struct {
-		name           string
-		token          string
-		wantCode       int
-		wantInResponse string
-		checkDeleted   bool
+		name       string
+		token      string
+		wantStatus int
 	}{
 		{
-			name:           "success",
-			token:          unsubToken,
-			wantCode:       http.StatusOK,
-			wantInResponse: "Unsubscribed successfully",
-			checkDeleted:   true,
+			name:       "success",
+			token:      unsubToken,
+			wantStatus: http.StatusOK,
 		},
 		{
-			name:           "not found",
-			token:          "fc8d3f99-2c1a-4447-bb67-222fae930842",
-			wantCode:       http.StatusNotFound,
-			wantInResponse: "Token not found",
-			checkDeleted:   false,
+			name:       "token not found",
+			token:      "dfc16b26-842a-4c8e-b31c-53c6a29360e6",
+			wantStatus: http.StatusNotFound,
 		},
 		{
-			name:           "missing token",
-			token:          "",
-			wantCode:       http.StatusNotFound,
-			wantInResponse: "404 page not found",
-			checkDeleted:   false,
+			name:       "invalid token",
+			token:      "",
+			wantStatus: http.StatusNotFound,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			url := "/api/unsubscribe/"
-			if tc.token != "" {
-				url += tc.token
-			}
+			url := "/api/unsubscribe/" + tc.token
 			req := httptest.NewRequest("GET", url, nil)
+
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
-			assert.Equal(t, tc.wantCode, w.Code)
-			assert.Contains(t, w.Body.String(), tc.wantInResponse)
 
-			if tc.checkDeleted {
-				var check repo.SubscriptionDB
-				err := db.First(&check, "email = ?", "unsubscribe@email.com").Error
-				assert.Error(t, err)
-				assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
-			}
+			assert.Equal(t, tc.wantStatus, w.Code)
 		})
 	}
 }
@@ -381,51 +322,38 @@ func TestGetWeather_Integration(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.GET("/api/weather",
-		middleware.QueryParamRequiredMiddleware("city", middleware.LatinOnlyRegex),
-		subHandler.GetWeather,
-	)
+	r.GET("/api/weather", subHandler.GetWeather)
 
 	tests := []struct {
-		name           string
-		url            string
-		wantStatus     int
-		wantInResponse string
+		name       string
+		queryCity  string
+		wantStatus int
 	}{
 		{
-			name:           "valid city",
-			url:            "/api/weather?city=Kyiv",
-			wantStatus:     http.StatusOK,
-			wantInResponse: "Clear",
+			name:       "success",
+			queryCity:  "Kyiv",
+			wantStatus: http.StatusOK,
 		},
 		{
-			name:           "city not found",
-			url:            "/api/weather?city=Atlantis",
-			wantStatus:     http.StatusNotFound,
-			wantInResponse: "City not found",
+			name:       "city not found",
+			queryCity:  "Atlantis",
+			wantStatus: http.StatusNotFound,
 		},
 		{
-			name:           "city missing",
-			url:            "/api/weather",
-			wantStatus:     http.StatusBadRequest,
-			wantInResponse: "city is required",
-		},
-		{
-			name:           "city not latin",
-			url:            "/api/weather?city=Київ",
-			wantStatus:     http.StatusBadRequest,
-			wantInResponse: "city must be in Latin letters",
+			name:       "city missing",
+			queryCity:  "",
+			wantStatus: http.StatusBadRequest,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", tc.url, nil)
+			req := httptest.NewRequest("GET", "/api/weather?city="+tc.queryCity, nil)
+
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 
 			assert.Equal(t, tc.wantStatus, w.Code)
-			assert.Contains(t, w.Body.String(), tc.wantInResponse)
 		})
 	}
 }

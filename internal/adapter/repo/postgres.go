@@ -60,10 +60,7 @@ func (r *PostgresRepo) GetByToken(token string) (*model.Subscription, error) {
 		return nil, result.Error
 	}
 	if result.Error != nil {
-		pkg.Logger.Error("Failed to get subscription by token",
-			zap.String("token", token),
-			zap.Error(result.Error),
-		)
+		pkg.Logger.Error("Failed to get subscription by token", zap.String("token", token), zap.Error(result.Error))
 		return nil, result.Error
 	}
 	pkg.Logger.Info("Subscription found by token", zap.String("token", token))

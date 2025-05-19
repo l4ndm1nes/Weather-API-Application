@@ -28,8 +28,8 @@ func main() {
 	cfg := config.LoadConfig()
 
 	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=require",
-		cfg.DBHost, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBPort,
+		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
+		cfg.DBHost, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBPort, cfg.DB_SSLMODE,
 	)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
@@ -63,6 +63,11 @@ func main() {
 
 	r.Use(cors.Default())
 	r.Static("/static", "./web/static")
+
+	r.Static("/swagger", "./docs/swagger-ui")
+	r.GET("/swagger", func(c *gin.Context) {
+		c.Redirect(302, "/swagger/index.html")
+	})
 
 	r.GET("/", func(c *gin.Context) {
 		c.File("./web/static/index.html")
