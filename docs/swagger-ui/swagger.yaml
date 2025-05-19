@@ -3,7 +3,7 @@ info:
   description: "Weather API application that allows users to subscribe to weather updates for their city."
   version: "1.0.0"
   title: "Weather Forecast API"
-host: "localhost:8080"
+host: "${BASE_URL}"
 basePath: "/api"
 tags:
   - name: "weather"
